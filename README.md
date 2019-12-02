@@ -40,7 +40,7 @@ For more information on the **Telebyte**, see the official product [**documentat
 The Telebyte L1 shell is based on the [**Layer 1 Switch Shell Standard**](https://github.com/QualiSystems/shell-L1-template).
 
 ### Supported OS
-▪ [OS Name]
+▪ Mux-2.6.0.1
 
 ### Requirements
 
