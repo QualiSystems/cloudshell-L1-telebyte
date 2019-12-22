@@ -127,7 +127,7 @@ class DriverCommands(DriverCommandsInterface):
                 for port_name in [port_name_1, port_name_2]:
                     self._logger.debug("Port ID : {}".format(port_name))
 
-                    blade = Blade(port_name, "Generic L1 Module", "")
+                    blade = Blade(port_name, "Generic L1 SubModule", "")
                     blade.set_parent_resource(real_blade)
 
                     for i in [1, 2]:
