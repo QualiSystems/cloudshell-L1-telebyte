@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
-
+import re
 from cloudshell.layer_one.core.driver_commands_interface import DriverCommandsInterface
 from cloudshell.layer_one.core.response.response_info import ResourceDescriptionResponseInfo, GetStateIdResponseInfo, \
     AttributeValueResponseInfo
@@ -12,7 +12,7 @@ from cloudshell.layer_one.core.response.resource_info.entities.port import Port
 from telebyte.command_actions.autoload_actions import AutoloadActions
 from telebyte.command_actions.mapping_actions import MappingActions
 from telebyte.cli.telebyte_cli_handler import TelebyteCliHandler
-from telebyte.exceptions.telebyte_exceptions import InvalidSlotNumberException, InvalidConnectionException
+# from telebyte.exceptions.telebyte_exceptions import InvalidSlotNumberException, InvalidConnectionException
 
 
 class DriverCommands(DriverCommandsInterface):
@@ -30,6 +30,16 @@ class DriverCommands(DriverCommandsInterface):
         self._runtime_config = runtime_config
         self._cli_handler = TelebyteCliHandler(logger)
         self._max_slot_count = runtime_config.read_key("DRIVER.SLOT_COUNT", self.SLOT_COUNT)
+
+    def address_parser(self, address):
+        """  """
+
+        match = re.search(r"(?P<address>.*):(?P<blade>\d):(?P<port_1>\w):(?P<port_2>\w)", address)
+        if match:
+            return match.groupdict()
+        else:
+            raise Exception("Wrong address format."
+                            "Address should be in format <address>:<blade_number>:<literal_port_1>:<literal_port_2>")
 
     def login(self, address, username, password):
         """
@@ -50,6 +60,7 @@ class DriverCommands(DriverCommandsInterface):
                 self._logger.info(device_info)
         """
 
+        address = self.address_parser(address).get("address")
         self._cli_handler.define_session_attributes(address, username, password)
         with self._cli_handler.default_mode_service() as session:
             actions = AutoloadActions(session, self._logger)
@@ -88,6 +99,13 @@ class DriverCommands(DriverCommandsInterface):
             return ResourceDescriptionResponseInfo([chassis])
         """
 
+        address_data = self.address_parser(address)
+
+        address = address_data.get("address")
+        slot_id = address_data.get("blade")
+        port_name_1 = address_data.get("port_1")
+        port_name_2 = address_data.get("port_2")
+
         with self._cli_handler.default_mode_service() as session:
             autoload_actions = AutoloadActions(session, self._logger)
 
@@ -98,82 +116,101 @@ class DriverCommands(DriverCommandsInterface):
             chassis.set_os_version(autoload_actions.get_device_software())
             chassis.set_serial_number(serial_number)
 
-            slot_id = 0
-            while slot_id <= self._max_slot_count:
-                try:
-                    slot_id += 1
-                    slot_info = autoload_actions.get_slot_info(slot_id=slot_id)
-                    self._logger.debug("SLOT INFO: {}".format(slot_info))
+            slot_info = autoload_actions.get_slot_info(slot_id=slot_id)
+            self._logger.debug("SLOT INFO: {}".format(slot_info))
 
-                    if slot_info:
-                        blade = Blade(slot_id, "Generic L1 Module", slot_info.get("Serial", ""))
-                        blade.set_model_name(slot_info.get("Model", ""))
-                        blade.set_parent_resource(chassis)
+            if slot_info:
+                real_blade = Blade(port_name_1, "Generic L1 Module", slot_info.get("Serial", ""))
+                real_blade.set_model_name(slot_info.get("Model", ""))
+                real_blade.set_parent_resource(chassis)
 
-                        ports = {}
-                        out_ports, in_ports = autoload_actions.get_in_out_ports(slot_info=slot_info)
-                        self._logger.debug("OUT PORTS: {}, IN PORTS: {}".format(out_ports, in_ports))
-                        if out_ports is None:
-                            raise Exception("Can not determine out port count")
+                for port_name in [port_name_1, port_name_2]:
+                    self._logger.debug("Port ID : {}".format(port_name))
 
-                        for i in range(1, out_ports + 1):
-                            port_id = chr(i + self.PORT_ADD)
-                            port_serial = "{dev_serial}.{port_id}".format(dev_serial=slot_info.get("Serial", ""),
-                                                                          port_id=port_id)
-                            self._logger.debug("Port ID : {}".format(port_id))
+                    blade = Blade(port_name, "Generic L1 Module", "")
+                    blade.set_parent_resource(real_blade)
 
-                            port = Port(port_id, "Generic L1 Port", port_serial)
-                            port.set_parent_resource(blade)
-                            ports[port_id] = port
+                    for i in [1, 2]:
+                        port_id = "{}{}".format(port_name, i)
+                        port_serial = "{dev_serial}.{port_id}".format(dev_serial=slot_info.get("Serial", ""),
+                                                                      port_id=port_id)
+                        port = Port(port_id, "Generic L1 Port", port_serial)
+                        port.set_parent_resource(blade)
 
-                        for i in range(1, in_ports + 1):
-                            port_id = i
-
-                            port_serial = "{dev_serial}.{port_id}".format(dev_serial=slot_info.get("Serial", ""),
-                                                                          port_id=port_id)
-                            self._logger.debug("Port ID : {}".format(port_id))
-
-                            port = Port(port_id, "Generic L1 Port", port_serial)
-                            port.set_parent_resource(blade)
-                            ports[port_id] = port
-
-                        conn_info = autoload_actions.get_slot_connections(slot_id=slot_id)
-                        self._logger.debug("SLOT CONNECTIONS: {}".format(conn_info))
-
-                        for out_port_id, in_port_id in conn_info.items():
-                            if in_port_id == 0: #  means no connection
-                                continue
-
-                            out_port = ports.get(out_port_id)
-                            in_port = ports.get(in_port_id)
-                            out_port.add_mapping(in_port)
-                            in_port.add_mapping(out_port)
-
-
-                except InvalidSlotNumberException:
-                    # self._max_slot_count = min(slot_id, self._max_slot_count)
-                    break
+            # slot_id = 0
+            # while slot_id <= self._max_slot_count:
+            #     try:
+            #         slot_id += 1
+            #         slot_info = autoload_actions.get_slot_info(slot_id=slot_id)
+            #         self._logger.debug("SLOT INFO: {}".format(slot_info))
+            #
+            #         if slot_info:
+            #             blade = Blade(slot_id, "Generic L1 Module", slot_info.get("Serial", ""))
+            #             blade.set_model_name(slot_info.get("Model", ""))
+            #             blade.set_parent_resource(chassis)
+            #
+            #             ports = {}
+            #             out_ports, in_ports = autoload_actions.get_in_out_ports(slot_info=slot_info)
+            #             self._logger.debug("OUT PORTS: {}, IN PORTS: {}".format(out_ports, in_ports))
+            #             if out_ports is None:
+            #                 raise Exception("Can not determine out port count")
+            #
+            #             for i in range(1, out_ports + 1):
+            #                 port_id = chr(i + self.PORT_ADD)
+            #                 port_serial = "{dev_serial}.{port_id}".format(dev_serial=slot_info.get("Serial", ""),
+            #                                                               port_id=port_id)
+            #                 self._logger.debug("Port ID : {}".format(port_id))
+            #
+            #                 port = Port(port_id, "Generic L1 Port", port_serial)
+            #                 port.set_parent_resource(blade)
+            #                 ports[port_id] = port
+            #
+            #             for i in range(1, in_ports + 1):
+            #                 port_id = i
+            #
+            #                 port_serial = "{dev_serial}.{port_id}".format(dev_serial=slot_info.get("Serial", ""),
+            #                                                               port_id=port_id)
+            #                 self._logger.debug("Port ID : {}".format(port_id))
+            #
+            #                 port = Port(port_id, "Generic L1 Port", port_serial)
+            #                 port.set_parent_resource(blade)
+            #                 ports[port_id] = port
+            #
+            #             conn_info = autoload_actions.get_slot_connections(slot_id=slot_id)
+            #             self._logger.debug("SLOT CONNECTIONS: {}".format(conn_info))
+            #
+            #             for out_port_id, in_port_id in conn_info.items():
+            #                 if in_port_id == 0: #  means no connection
+            #                     continue
+            #
+            #                 out_port = ports.get(out_port_id)
+            #                 in_port = ports.get(in_port_id)
+            #                 out_port.add_mapping(in_port)
+            #                 in_port.add_mapping(out_port)
+            #
+            #     except InvalidSlotNumberException:
+            #         # self._max_slot_count = min(slot_id, self._max_slot_count)
+            #         break
 
         return ResourceDescriptionResponseInfo([chassis])
 
     def map_uni(self, src_port, dst_ports):
         """ Unidirectional mapping of two ports
-        :param src_port: src port address, "192.168.42.240/1/21"
+        :param src_port: src port address, "192.168.42.240/1/A/A1"
         :type src_port: str
-        :param dst_ports: list of dst ports addresses, ["192.168.42.240/1/22", "192.168.42.240/1/23"]
+        :param dst_ports: list of dst ports addresses, ["192.168.42.240/1/A/A2", "192.168.42.240/1/B/B2"]
         :type dst_ports: list
         :return: None
         :raises Exception: if command failed
         """
 
-
         raise Exception("Unidirectional connection does not supported")
 
     def map_bidi(self, src_port, dst_port):
         """ Create a bidirectional connection between source and destination ports
-        :param src_port: src port address, "192.168.42.240/1/21"
+        :param src_port: src port address, "192.168.42.240/1/A/A1"
         :type src_port: str
-        :param dst_port: dst port address, "192.168.42.240/1/22"
+        :param dst_port: dst port address, "192.168.42.240/1/B/B2"
         :type dst_port: str
         :return: None
         :raises Exception: if command failed
@@ -182,13 +219,24 @@ class DriverCommands(DriverCommandsInterface):
         with self._cli_handler.default_mode_service() as session:
             mapping_actions = MappingActions(session, self._logger)
 
-            _, src_blade, src = src_port.split("/")
-            _, dst_blade, dst = dst_port.split("/")
+            for port in [src_port, dst_port]:
+                _, blade, port_aggr, port_id = port.split("/")
 
-            if src_blade != dst_blade:
-                raise InvalidConnectionException("Connections can be created inside one blade only")
+                match = re.search(r"\w+(?P<port_id>\d+)", port_id)
+                if match:
+                    port_id = match.groupdict()["port_id"]
+                else:
+                    raise Exception("Wrong port name structure provided")
 
-            mapping_actions.map_bidi(slot_id=src_blade, src_port=src, dst_port=dst)
+                mapping_actions.map_bidi(slot_id=blade, src_port=port_id, dst_port=port_aggr)
+
+            # _, src_blade, src_port_aggr, src = src_port.split("/")
+            # _, dst_blade, dst_port_aggr, dst = dst_port.split("/")
+            #
+            # if src_blade != dst_blade:
+            #     raise InvalidConnectionException("Connections can be created inside one blade only")
+            #
+            # mapping_actions.map_bidi(slot_id=src_blade, src_port=src, dst_port=dst)
 
     def map_clear_to(self, src_port, dst_ports):
         """ Remove simplex/multi-cast/duplex connection ending on the destination port
@@ -200,18 +248,27 @@ class DriverCommands(DriverCommandsInterface):
         :raises Exception: if command failed
         """
 
-
         self._logger.debug("SRC: {}, DST: {}".format(src_port, dst_ports))
 
-        _, blade_id, src = src_port.split("/")
+        ports_list = [src_port]
+        ports_list.extend(dst_ports)
 
-        try:
-            src = int(src)
-            self._logger.debug("Port identifier should be literal not numeric. Got: {}".format(src_port))
-        except ValueError:
-            with self._cli_handler.default_mode_service() as session:
-                mapping_actions = MappingActions(session, self._logger)
-                mapping_actions.map_clear(slot_id=blade_id, port=src)
+        with self._cli_handler.default_mode_service() as session:
+            mapping_actions = MappingActions(session, self._logger)
+            for port in ports_list:
+                _, blade_id, port_aggr, _ = port.split("/")
+
+                mapping_actions.map_clear(slot_id=blade_id, port=port_aggr)
+
+        # _, blade_id, src = src_port.split("/")
+        #
+        # try:
+        #     src = int(src)
+        #     self._logger.debug("Port identifier should be literal not numeric. Got: {}".format(src_port))
+        # except ValueError:
+        #     with self._cli_handler.default_mode_service() as session:
+        #         mapping_actions = MappingActions(session, self._logger)
+        #         mapping_actions.map_clear(slot_id=blade_id, port=src)
 
         # raise Exception("Unidirectional connection does not supported")
 
@@ -239,10 +296,10 @@ class DriverCommands(DriverCommandsInterface):
             mapping_actions = MappingActions(session, self._logger)
             for port in ports:
 
-                _, blade_id, src = port.split("/")
+                _, blade_id, src, _ = port.split("/")
+                # _, blade_id, src = port.split("/")
 
                 mapping_actions.map_clear(slot_id=blade_id, port=src)
-
 
     def map_tap(self, src_port, dst_ports):
         """

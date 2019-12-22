@@ -190,6 +190,22 @@
                     </ParentModels>
                     <Drivers/>
                 </ResourceModel>
+                <ResourceModel Name="Generic L1 SubModule" Description=""
+                               SupportsConcurrentCommands="false">
+                    <AttachedAttributes>
+                        <AttachedAttribute Name="Model Name" IsOverridable="true" IsLocal="true">
+                            <AllowedValues/>
+                        </AttachedAttribute>
+                        <AttachedAttribute Name="Serial Number" IsOverridable="true" IsLocal="true">
+                            <AllowedValues/>
+                        </AttachedAttribute>
+                    </AttachedAttributes>
+                    <AttributeValues/>
+                    <ParentModels>
+                        <ParentModelName>Generic L1 Module</ParentModelName>
+                    </ParentModels>
+                    <Drivers/>
+                </ResourceModel>
             </Models>
         </ResourceFamily>
         <ResourceFamily Name="L1 Switch Port" IsMappableContainer="false" IsMappable="true"
@@ -242,7 +258,7 @@
                         <AttributeValue Name="Protocol Type" Value="0"/>
                     </AttributeValues>
                     <ParentModels>
-                        <ParentModelName>Generic L1 Module</ParentModelName>
+                        <ParentModelName>Generic L1 SubModule</ParentModelName>
                     </ParentModels>
                     <Drivers/>
                 </ResourceModel>
